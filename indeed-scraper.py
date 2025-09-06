@@ -95,8 +95,8 @@ class AlternativeJobScraper:
             )
             
             # Extract job data
-            job_cards = self.driver.find_elements(By.CSS_SELECTOR, "[data-testid='job_result']")[:20]
-            
+            job_card_parent = self.driver.find_elements(By.CSS_SELECTOR, "[data-testid='job_result']")
+            job_cards = job_card_parent.find_elements(By.TAG_NAME, "div")[:20]
             for card in job_cards:
                 try:
                     title = card.find_element(By.CSS_SELECTOR, "h2 a").text
@@ -126,6 +126,60 @@ class AlternativeJobScraper:
         except Exception as e:
             print(f"❌ Error scraping ZipRecruiter: {e}")
             return []
+    def human_like_send_keys(self,element, text):
+        print(element, text)
+        for char in text:
+            element.send_keys(char)
+            # Introduce a small, random delay (e.g., between 0.05 and 0.2 seconds)
+            time.sleep(0.10) 
+    def login_if_needed(self, username, password):
+        print("Checking page title...")
+        time.sleep(10)
+        # Selects an <a> tag that has a child <span> with the exact text 'Log In'
+        element = self.driver.find_element(By.XPATH, "//a[./span[text()='Log in']]")
+        if element:
+            print("Page title indicates login is required. Proceeding with login...")
+            element.click()
+            try:
+                # Wait for the username and password fields to be present.
+                username_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "Input_Email"))
+                )
+                password_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "passwordInput"))
+                )
+                login_button = self.driver.find_element(By.CSS_SELECTOR, "[name='Input.Button']") # Assuming the button has this ID
+
+                # Fill in the fields and click the button
+                # username_field.send_keys(username)
+                self.human_like_send_keys(username_field, username)
+                self.human_like_send_keys(password_field, password)
+                # password_field.send_keys(password)
+                time.sleep(2)  # A short delay for human-like behavior
+                login_button.click()
+
+                print("Login credentials sent. Waiting for page to redirect...")
+
+                # Wait for the URL to change to confirm a successful login
+                # You can also wait for a unique element on the post-login page
+                WebDriverWait(self.driver, 10).until(
+                    EC.url_changes(self.driver.current_url)
+                )
+
+                if "Add Contact Information" in self.driver.title:
+                    print('onboarding page acheived')
+                    time.sleep(5)
+                    element = self.driver.find_element(By.CSS_SELECTOR, "[data-testid='cancel-onboarding-iconbutton']")
+
+                    element.click()
+                print("logging done")
+
+            except Exception as e:
+                print(f"An error occurred during login: {e}")
+                
+        else:
+            print("Login not required. Page title does not contain 'Login' or 'Sign In'.")
+
             
     def scrape_monster_jobs(self, job_title="software engineer", location="New York"):
         """Scrape Monster.com - usually very scraper-friendly"""
@@ -134,11 +188,12 @@ class AlternativeJobScraper:
         try:
             # Navigate to Monster
             url = f"https://www.monster.com/jobs/search?q={job_title.replace(' ', '%20')}&where={location.replace(' ', '%20')}"
+            
             self.driver.get(url)
             
             # ADDED: Pause after page navigation
             print("Pausing for 15 seconds to allow for manual inspection after page navigation.")
-            
+            self.login_if_needed("jaideepgrover147@gmail.com", "Jaideep@123")
             jobs = []
             
             # Wait for job listings
@@ -151,32 +206,36 @@ class AlternativeJobScraper:
             time.sleep(15)
             
             # Extract job data
-            job_cards = self.driver.find_elements(By.CSS_SELECTOR, ".indexmodern__StyledJobCardsContainer-sc-9vl52l-42.hRDWlh")[:20]
-            print(job_cards)
+            job_card_parent = self.driver.find_elements(By.CSS_SELECTOR, ".indexmodern__StyledJobCardsContainer-sc-9vl52l-42.hRDWlh")[0]
+            job_cards = job_card_parent.find_elements(By.TAG_NAME, "div")
+            print(len(job_cards))
             for card in job_cards:
                 try:
-                    title = card.find_element(By.CSS_SELECTOR, "h2 a").text
-                    company = card.find_element(By.CSS_SELECTOR, "[data-testid='svx-job-card-company']").text
-                    location = card.find_element(By.CSS_SELECTOR, "[data-testid='svx-job-card-location']").text
-                    
-                    try:
-                        salary = card.find_element(By.CSS_SELECTOR, "[data-testid='svx-job-card-salary']").text
-                    except:
-                        salary = "Not specified"
+                    title_ = card.find_element(By.CSS_SELECTOR, "h3")
+                    title = title_.get_attribute("aria-label")
+                    print(title)
                     
                     jobs.append({
                         'title': title,
-                        'company': company,
-                        'location': location,
-                        'salary': salary,
-                        'source': 'Monster',
-                        'scraped_at': datetime.now().isoformat()
+                        # 'company': company,
+                        # 'location': location,
+                        # 'salary': salary,
+                        # 'source': 'Monster',
+                        # 'scraped_at': datetime.now().isoformat()
                     })
+                    apply_button = card.find_element(By.CSS_SELECTOR, "[data-testid='apply-button']")
+                    apply_button.click()
                     
                 except Exception as e:
                     continue
-                    
-            print(f"✅ Found {len(jobs)} jobs on Monster")
+            parent_tab = self.driver.current_window_handle
+            all_tabs = self.driver.window_handles        
+            for handle in all_tabs:
+                time.sleep(5)
+                if handle != parent_tab:
+                    self.driver.switch_to.window(handle)
+                    print("Already logged in. Proceeding with scraping.")
+                        
             return jobs
             
         except Exception as e:
@@ -263,8 +322,8 @@ if __name__ == "__main__":
     try:
         # Scrape multiple job sites
         all_jobs = scraper.scrape_all_sites(
-            job_title="python developer",
-            location="San Francisco"
+            job_title="Administrative Assitant",
+            location="Remote"
         )
         
         # Save results
