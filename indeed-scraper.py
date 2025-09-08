@@ -2,341 +2,264 @@ import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
-import random
-import json
+from selenium.common.exceptions import NoSuchElementException
+import time, random, json, os
 from datetime import datetime
 
-class AlternativeJobScraper:
+class MonsterJobScraper:
+    COOKIE_FILE = "cookies.json"
+
     def __init__(self):
         self.driver = None
-        # You should also add headless=False here for better debugging
-        self.setup_driver(headless=False) 
-        
+        self.setup_driver(headless=False)
+
     def setup_driver(self, headless=False):
-        """Setup undetected Chrome driver"""
         options = uc.ChromeOptions()
         options.add_argument('--no-first-run')
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_argument('--disable-extensions')
-        
-        # Add headless option here to control from __init__
+        options.add_argument('--disable-infobars')
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument('--user-agent=' + self.get_random_user_agent())
+
+        if headless:
+            options.add_argument('--headless')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+
         self.driver = uc.Chrome(options=options, version_main=140, headless=headless)
-        
-    def human_delay(self, min_sec=2, max_sec=5):
-        """Human-like delays"""
-        time.sleep(random.uniform(min_sec, max_sec))
-        
-    def scrape_glassdoor_jobs(self, job_title="software engineer", location="New York"):
-        """Scrape Glassdoor - usually more lenient than Indeed"""
-        print(f"🔍 Scraping Glassdoor for '{job_title}' in '{location}'...")
-        
-        try:
-            # Navigate to Glassdoor
-            url = f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={job_title.replace(' ', '%20')}&locT=C&locId=1132348"
-            self.driver.get(url)
-            self.human_delay(3, 6)
-            
-            jobs = []
-            
-            # Wait for job listings
-            WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-test='job-link']"))
-            )
-            
-            # Extract job data
-            job_cards = self.driver.find_elements(By.CSS_SELECTOR, "[data-test='job-link']")[:20]
-            
-            for card in job_cards:
+
+    # ----------------- Cookies -----------------
+    def load_cookies(self):
+        if os.path.exists(self.COOKIE_FILE):
+            with open(self.COOKIE_FILE, "r") as f:
+                cookies = json.load(f)
+            for cookie in cookies:
+                cookie.pop("sameSite", None)
+                cookie.pop("expiry", None)
                 try:
-                    title = card.find_element(By.CSS_SELECTOR, "[data-test='job-title']").text
-                    company = card.find_element(By.CSS_SELECTOR, "[data-test='employer-name']").text
-                    location = card.find_element(By.CSS_SELECTOR, "[data-test='job-location']").text
-                    
-                    try:
-                        salary = card.find_element(By.CSS_SELECTOR, "[data-test='detailSalary']").text
-                    except:
-                        salary = "Not specified"
-                    
-                    jobs.append({
-                        'title': title,
-                        'company': company,
-                        'location': location,
-                        'salary': salary,
-                        'source': 'Glassdoor',
-                        'scraped_at': datetime.now().isoformat()
-                    })
-                    
-                except Exception as e:
+                    self.driver.add_cookie(cookie)
+                except Exception:
                     continue
-                    
-            print(f"✅ Found {len(jobs)} jobs on Glassdoor")
-            return jobs
-            
-        except Exception as e:
-            print(f"❌ Error scraping Glassdoor: {e}")
-            return []
-            
-    def scrape_ziprecruiter_jobs(self, job_title="software engineer", location="New York"):
-        """Scrape ZipRecruiter - often easier than Indeed"""
-        print(f"🔍 Scraping ZipRecruiter for '{job_title}' in '{location}'...")
-        
-        try:
-            # Navigate to ZipRecruiter
-            url = f"https://www.ziprecruiter.com/Jobs/{job_title.replace(' ', '-')}/{location.replace(' ', '-').replace(',', '')}"
-            self.driver.get(url)
-            self.human_delay(3, 6)
-            
-            jobs = []
-            
-            # Wait for job listings
-            WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='job_result']"))
-            )
-            
-            # Extract job data
-            job_card_parent = self.driver.find_elements(By.CSS_SELECTOR, "[data-testid='job_result']")
-            job_cards = job_card_parent.find_elements(By.TAG_NAME, "div")[:20]
-            for card in job_cards:
-                try:
-                    title = card.find_element(By.CSS_SELECTOR, "h2 a").text
-                    company = card.find_element(By.CSS_SELECTOR, "[data-testid='company-name']").text
-                    location = card.find_element(By.CSS_SELECTOR, "[data-testid='job-location']").text
-                    
-                    try:
-                        salary = card.find_element(By.CSS_SELECTOR, "[data-testid='job-salary']").text
-                    except:
-                        salary = "Not specified"
-                    
-                    jobs.append({
-                        'title': title,
-                        'company': company,
-                        'location': location,
-                        'salary': salary,
-                        'source': 'ZipRecruiter',
-                        'scraped_at': datetime.now().isoformat()
-                    })
-                    
-                except Exception as e:
-                    continue
-                    
-            print(f"✅ Found {len(jobs)} jobs on ZipRecruiter")
-            return jobs
-            
-        except Exception as e:
-            print(f"❌ Error scraping ZipRecruiter: {e}")
-            return []
-    def human_like_send_keys(self,element, text):
-        print(element, text)
+            self.driver.refresh()
+
+    def save_cookies(self):
+        with open(self.COOKIE_FILE, "w") as f:
+            json.dump(self.driver.get_cookies(), f)
+
+    # ----------------- Helpers -----------------
+    def get_random_user_agent(self):
+        return random.choice([
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36'
+        ])
+
+    def human_delay(self, short=False, long=False):
+        if short:
+            time.sleep(random.uniform(0.5, 4))
+        elif long:
+            time.sleep(random.uniform(5, 20))
+        else:
+            time.sleep(random.uniform(2, 8))
+
+    def human_like_send_keys(self, element, text):
         for char in text:
             element.send_keys(char)
-            # Introduce a small, random delay (e.g., between 0.05 and 0.2 seconds)
-            time.sleep(0.10) 
-    def login_if_needed(self, username, password):
-        print("Checking page title...")
-        time.sleep(10)
-        # Selects an <a> tag that has a child <span> with the exact text 'Log In'
-        element = self.driver.find_element(By.XPATH, "//a[./span[text()='Log in']]")
-        if element:
-            print("Page title indicates login is required. Proceeding with login...")
-            element.click()
-            try:
-                # Wait for the username and password fields to be present.
-                username_field = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.ID, "Input_Email"))
-                )
-                password_field = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.ID, "passwordInput"))
-                )
-                login_button = self.driver.find_element(By.CSS_SELECTOR, "[name='Input.Button']") # Assuming the button has this ID
+            time.sleep(random.uniform(0.05, 0.3))
+            if char in [' ', '.', '@', '_']:
+                time.sleep(random.uniform(0.2, 0.7))
 
-                # Fill in the fields and click the button
-                # username_field.send_keys(username)
-                self.human_like_send_keys(username_field, username)
-                self.human_like_send_keys(password_field, password)
-                # password_field.send_keys(password)
-                time.sleep(2)  # A short delay for human-like behavior
-                login_button.click()
+    def maybe_extra_pause(self, chance=0.3):
+        if random.random() < chance:
+            time.sleep(random.uniform(3, 10))
 
-                print("Login credentials sent. Waiting for page to redirect...")
+    def human_scroll(self):
+        scroll_steps = random.randint(1, 3)
+        for _ in range(scroll_steps):
+            offset = random.randint(200, 500)
+            self.driver.execute_script(f"window.scrollBy(0, {offset});")
+            time.sleep(random.uniform(1, 4))
+        if random.random() < 0.5:
+            self.driver.execute_script("window.scrollBy(0, -200);")
+            time.sleep(random.uniform(1, 3))
 
-                # Wait for the URL to change to confirm a successful login
-                # You can also wait for a unique element on the post-login page
-                WebDriverWait(self.driver, 10).until(
-                    EC.url_changes(self.driver.current_url)
-                )
-
-                if "Add Contact Information" in self.driver.title:
-                    print('onboarding page acheived')
-                    time.sleep(5)
-                    element = self.driver.find_element(By.CSS_SELECTOR, "[data-testid='cancel-onboarding-iconbutton']")
-
-                    element.click()
-                print("logging done")
-
-            except Exception as e:
-                print(f"An error occurred during login: {e}")
-                
-        else:
-            print("Login not required. Page title does not contain 'Login' or 'Sign In'.")
-
-            
-    def scrape_monster_jobs(self, job_title="software engineer", location="New York"):
-        """Scrape Monster.com - usually very scraper-friendly"""
-        print(f"🔍 Scraping Monster for '{job_title}' in '{location}'...")
-        
+    # ----------------- Login -----------------
+    def is_logged_in(self):
         try:
-            # Navigate to Monster
-            url = f"https://www.monster.com/jobs/search?q={job_title.replace(' ', '%20')}&where={location.replace(' ', '%20')}"
-            
-            self.driver.get(url)
-            
-            # ADDED: Pause after page navigation
-            print("Pausing for 15 seconds to allow for manual inspection after page navigation.")
-            self.login_if_needed("jaideepgrover147@gmail.com", "Jaideep@123")
-            jobs = []
-            
-            # Wait for job listings
-            WebDriverWait(self.driver, 50).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-test-id='svx-job-card-component-0']"))
+            self.driver.find_element(By.CSS_SELECTOR, "[aria-label='My Account']")
+            return True
+        except NoSuchElementException:
+            return False
+
+    def login(self, username, password):
+        print("➡️ Opening Monster homepage...")
+        self.driver.get("https://www.monster.com")
+        self.human_delay(long=True)
+
+        self.load_cookies()
+        self.human_delay()
+
+        if self.is_logged_in():
+            print("✅ Already logged in via cookies.")
+            return
+
+        print("❌ Not logged in. Proceeding with manual login...")
+        try:
+            login_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//a[./span[text()='Log in']]"))
             )
-            
-            # ADDED: Pause after elements are located
-            print("Pausing for 15 seconds to allow for manual inspection after elements are found.")
-            time.sleep(15)
-            
-            # Extract job data
-            job_card_parent = self.driver.find_elements(By.CSS_SELECTOR, ".indexmodern__StyledJobCardsContainer-sc-9vl52l-42.hRDWlh")[0]
-            job_cards = job_card_parent.find_elements(By.TAG_NAME, "div")
-            print(len(job_cards))
-            for card in job_cards:
+            login_button.click()
+            self.human_delay()
+
+            username_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "Input_Email"))
+            )
+            password_field = self.driver.find_element(By.ID, "passwordInput")
+            login_button_submit = self.driver.find_element(By.CSS_SELECTOR, "[name='Input.Button']")
+
+            self.human_like_send_keys(username_field, username)
+            self.human_delay(short=True)
+            self.human_like_send_keys(password_field, password)
+            self.maybe_extra_pause()  # hesitation before submit
+            login_button_submit.click()
+
+            WebDriverWait(self.driver, 10).until(EC.url_changes(self.driver.current_url))
+            print("✅ Login successful, saving cookies...")
+            self.save_cookies()
+
+        except Exception as e:
+            print(f"❌ Login failed: {e}")
+            raise
+
+    # ----------------- Scraping -----------------
+    def scrape_monster_jobs(self, job_title="software engineer", location="New York"):
+        print(f"\n🔍 Scraping Monster for '{job_title}' in '{location}'...")
+
+        # Step 1: Go back to homepage after login
+        self.driver.get("https://www.monster.com")
+        self.human_delay(long=True)   # long human-like delay
+        self.human_scroll()
+
+        # Step 2: Enter job title and location
+        try:
+            search_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "q2"))  # job title input
+            )
+            location_field = self.driver.find_element(By.ID, "where2")  # location input
+
+            search_field.clear()
+            self.human_like_send_keys(search_field, job_title)
+            self.human_delay(short=True)
+
+            location_field.clear()
+            self.human_like_send_keys(location_field, location)
+            self.human_delay(short=True)
+
+            # Click search button
+            search_button = self.driver.find_element(By.CSS_SELECTOR, "button[data-bi-id='search-button']")
+            search_button.click()
+            self.human_delay(long=True)  # wait for results to load
+
+        except Exception as e:
+            print(f"❌ Error setting up search: {e}")
+            return []
+
+        # Step 3: Scrape job cards
+        jobs = []
+        try:
+            WebDriverWait(self.driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-test-id^='svx-job-card-component']"))
+            )
+            job_cards = self.driver.find_elements(By.CSS_SELECTOR, "[data-test-id^='svx-job-card-component']")
+            print(f"Found {len(job_cards)} job cards on the page.")
+
+            for i, card in enumerate(job_cards[:10], 1):
                 try:
-                    title_ = card.find_element(By.CSS_SELECTOR, "h3")
-                    title = title_.get_attribute("aria-label")
-                    print(title)
-                    
+                    title = card.find_element(By.CSS_SELECTOR, "h3 a").get_attribute("aria-label")
+                    company = card.find_element(By.CSS_SELECTOR, "[data-test-id='svx-job-card-company-name']").text
+                    location_text = card.find_element(By.CSS_SELECTOR, "[data-test-id='svx-job-card-location']").text
+
                     jobs.append({
                         'title': title,
-                        # 'company': company,
-                        # 'location': location,
-                        # 'salary': salary,
-                        # 'source': 'Monster',
-                        # 'scraped_at': datetime.now().isoformat()
+                        'company': company,
+                        'location': location_text,
+                        'source': 'Monster',
+                        'scraped_at': datetime.now().isoformat()
                     })
-                    apply_button = card.find_element(By.CSS_SELECTOR, "[data-testid='apply-button']")
-                    apply_button.click()
-                    
+                    print(f"[{i}] {title} at {company}")
+                    self.human_delay(short=True)
+                    if random.random() < 0.2:
+                        self.human_scroll()
                 except Exception as e:
+                    print(f"Skipping job card {i}: {e}")
                     continue
-            parent_tab = self.driver.current_window_handle
-            all_tabs = self.driver.window_handles        
-            for handle in all_tabs:
-                time.sleep(5)
-                if handle != parent_tab:
-                    self.driver.switch_to.window(handle)
-                    print("Already logged in. Proceeding with scraping.")
-                        
-            return jobs
-            
+
         except Exception as e:
-            print(f"❌ Error scraping Monster: {e}")
-            return []
-            
-    def scrape_all_sites(self, job_title="software engineer", location="New York"):
-        """Scrape multiple job sites and combine results"""
-        print("🚀 Starting multi-site job scraping...")
-        
-        all_jobs = []
-        
-        # Scrape each site
-        sites_to_scrape = [
-            ('Monster', self.scrape_monster_jobs),
-            # ('ZipRecruiter', self.scrape_ziprecruiter_jobs),
-            # ('Glassdoor', self.scrape_glassdoor_jobs)
-        ]
-        
-        for site_name, scrape_function in sites_to_scrape:
-            try:
-                print(f"\n📄 Scraping {site_name}...")
-                site_jobs = scrape_function(job_title, location)
-                all_jobs.extend(site_jobs)
-                
-                # Delay between sites
-                self.human_delay(5, 10)
-                
-            except Exception as e:
-                print(f"❌ Failed to scrape {site_name}: {e}")
-                continue
-                
-        return all_jobs
-        
+            print(f"❌ Error during scraping: {e}")
+
+        print(f"✅ Scraped {len(jobs)} jobs.")
+        return jobs
+
+
+    # ----------------- Results -----------------
     def save_results(self, jobs):
-        """Save results to JSON file"""
         if not jobs:
-            print("No jobs found to save")
+            print("No jobs to save.")
             return
-            
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"alternative_jobs_{timestamp}.json"
-        
+        filename = f"monster_jobs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(jobs, f, indent=2, ensure_ascii=False)
-            
-        print(f"\n💾 Results saved to {filename}")
-        self.print_summary(jobs)
-        
-    def print_summary(self, jobs):
-        """Print scraping summary"""
-        print("\n" + "="*60)
-        print("                 JOB SCRAPING SUMMARY")
-        print("="*60)
-        print(f"Total jobs found: {len(jobs)}")
-        
-        # Group by source
-        by_source = {}
-        for job in jobs:
-            source = job.get('source', 'Unknown')
-            by_source[source] = by_source.get(source, 0) + 1
-            
-        print("\nJobs by source:")
-        for source, count in by_source.items():
-            print(f"  {source}: {count} jobs")
-            
-        if jobs:
-            print(f"\n📋 Sample Jobs:")
-            for i, job in enumerate(jobs[:5], 1):
-                print(f"\n{i}. {job['title']}")
-                print(f"   Company: {job['company']}")
-                print(f"   Location: {job['location']}")
-                print(f"   Source: {job['source']}")
-                
+        print(f"\n💾 Saved results to {filename}")
+
+    # ----------------- Lifecycle -----------------
+    def open(self):
+        print("➡️ Opening Monster homepage...")
+        self.driver.get("https://www.monster.com")
+        self.human_delay(2, 4)
+
+        # Try loading cookies
+        if os.path.exists(self.COOKIE_FILE):
+            print("🔑 Loading cookies from file...")
+            with open(self.COOKIE_FILE, "r") as f:
+                cookies = json.load(f)
+            for cookie in cookies:
+                cookie.pop("sameSite", None)   # remove unsupported fields
+                cookie.pop("expiry", None)
+                try:
+                    self.driver.add_cookie(cookie)
+                except Exception as e:
+                    print(f"⚠️ Could not add cookie {cookie.get('name')}: {e}")
+            self.driver.refresh()
+            self.human_delay(3, 5)
+
+        # Check login status
+        if self.is_logged_in():
+            print("✅ Logged in via cookies.")
+            return
+        else:
+            print("⚠️ Cookies invalid or expired, performing manual login...")
+            self.login('jaideepgrover147@gmail.com', 'Jaideep@123')
+            print("✅ Manual login completed, cookies updated.")
+
     def close(self):
-        """Close the driver"""
         if self.driver:
+            try:
+                self.save_cookies()
+            except Exception:
+                pass
             self.driver.quit()
 
-# Usage example
+
+# --- Main Execution ---
 if __name__ == "__main__":
-    scraper = AlternativeJobScraper()
-    
+    scraper = MonsterJobScraper()
     try:
-        # Scrape multiple job sites
-        all_jobs = scraper.scrape_all_sites(
-            job_title="Administrative Assitant",
-            location="Remote"
-        )
-        
-        # Save results
-        scraper.save_results(all_jobs)
-        
-    except Exception as e:
-        print(f"Scraping failed: {e}")
-        
+        scraper.open()
+        jobs = scraper.scrape_monster_jobs("Administrative Assistant", "Remote")
+        scraper.save_results(jobs)
     finally:
-        print("\nKeeping browser open for 30 seconds...")
-        time.sleep(30)
+        time.sleep(10)
         scraper.close()
-        
-    print("\n" + "="*60)
-    print("INSTALLATION: pip install undetected-chromedriver selenium")
-    print("="*60)
